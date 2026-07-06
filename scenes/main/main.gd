@@ -483,6 +483,10 @@ func _end_game(message: String) -> void:
 ##   Godot --path . -- --seed=7 --autobuild --autostart --screenshot=/tmp/s.png
 func _handle_debug_args() -> void:
 	var args := OS.get_cmdline_user_args()
+	# Fast-forward the whole simulation (physics, timers, tweens alike).
+	var timescale := _arg_value("--timescale")
+	if timescale != "":
+		Engine.time_scale = float(timescale)
 	if "--autobuild" in args:
 		GameState.earn(2000)
 		var type_ids := TURRET_TYPES.keys()
