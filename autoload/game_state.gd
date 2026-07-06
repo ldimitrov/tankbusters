@@ -8,7 +8,8 @@ signal money_changed(amount: int)
 signal lives_changed(amount: int)
 
 const STARTING_MONEY := 100
-const STARTING_LIVES := 20
+## Lives = how many tanks may escape. Losing the third one fails the level.
+const STARTING_LIVES := 3
 
 var money := STARTING_MONEY
 var lives := STARTING_LIVES
