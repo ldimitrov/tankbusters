@@ -17,6 +17,11 @@ var path: Curve2D
 ## which tank is "first" (furthest along the road).
 var progress := 0.0
 var hp := 0.0
+# Frost effect: speed is multiplied by (1 - _slow_factor) while time remains.
+var _slow_factor := 0.0
+var _slow_time_left := 0.0
+
+const SLOW_TINT := Color(0.55, 1.05, 1.75)
 
 ## @onready defers the assignment until the node enters the tree, when
 ## children exist. $Body is shorthand for get_node("Body").
@@ -32,7 +37,13 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
-	progress += speed * delta
+	if _slow_time_left > 0.0:
+		_slow_time_left -= delta
+		if _slow_time_left <= 0.0:
+			_slow_factor = 0.0
+			body.modulate = Color.WHITE
+
+	progress += speed * (1.0 - _slow_factor) * delta
 	if progress >= path.get_baked_length():
 		reached_base.emit()
 		queue_free()
@@ -46,6 +57,14 @@ func _process(delta: float) -> void:
 	var step := position - previous
 	if step.length_squared() > 0.01:
 		body.heading = Iso.screen_to_ground(step).angle()
+
+
+## Frost turrets call this repeatedly while a tank is inside their aura.
+## Stronger slows win; the effect wears off `duration` seconds after leaving.
+func apply_slow(factor: float, duration: float) -> void:
+	_slow_factor = maxf(_slow_factor, factor)
+	_slow_time_left = maxf(_slow_time_left, duration)
+	body.modulate = SLOW_TINT
 
 
 func take_damage(amount: float) -> void:
