@@ -1,0 +1,20 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scenes/main/main.gd" id="1"]
+[ext_resource type="PackedScene" path="res://scenes/ui/hud.tscn" id="2"]
+
+[node name="Main" type="Node2D"]
+script = ExtResource("1")
+
+[node name="World" type="Node2D" parent="."]
+
+[node name="Ground" type="Node2D" parent="World"]
+
+[node name="Markers" type="Node2D" parent="World"]
+
+[node name="EnemyPath" type="Path2D" parent="World"]
+
+[node name="Objects" type="Node2D" parent="World"]
+y_sort_enabled = true
+
+[node name="HUD" parent="." instance=ExtResource("2")]
