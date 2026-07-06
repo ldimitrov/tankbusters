@@ -10,23 +10,38 @@ extends Control
 signal option_selected(id: String)
 signal closed
 
+## Option dicts: {id, label, cost (optional), enabled (optional)}.
+var _options := []
+
 @onready var panel: PanelContainer = %Panel
 @onready var title_label: Label = %Title
 @onready var options_box: VBoxContainer = %OptionsBox
 
 
+func _ready() -> void:
+	# Costs can become affordable WHILE the menu is open (a bounty lands),
+	# so re-check the buttons on every money change instead of only on open.
+	GameState.money_changed.connect(func(_amount: int) -> void:
+		if visible:
+			_refresh_affordability())
+
+
 func open(screen_pos: Vector2, title: String, options: Array) -> void:
 	title_label.text = title
-	# Rebuild the option buttons from scratch each time.
+	_options = options
+	# Rebuild the option buttons from scratch each time. remove_child (not
+	# just queue_free) so the box holds ONLY the new buttons immediately —
+	# freed nodes linger until the end of the frame.
 	for child in options_box.get_children():
+		options_box.remove_child(child)
 		child.queue_free()
 	for option in options:
 		var button := Button.new()
 		button.text = option.label
-		button.disabled = not option.enabled
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		button.pressed.connect(_on_option_pressed.bind(option.id))
 		options_box.add_child(button)
+	_refresh_affordability()
 
 	visible = true
 	# Wait one frame so the panel recomputes its size before we position it.
@@ -34,6 +49,14 @@ func open(screen_pos: Vector2, title: String, options: Array) -> void:
 	var pos := screen_pos + Vector2(20, -panel.size.y / 2.0)
 	var limit := get_viewport_rect().size - panel.size - Vector2(8, 8)
 	panel.position = pos.clamp(Vector2(8, 8), limit)
+
+
+func _refresh_affordability() -> void:
+	for i in options_box.get_child_count():
+		var option: Dictionary = _options[i]
+		var button: Button = options_box.get_child(i)
+		button.disabled = not option.get("enabled", true) \
+				or option.get("cost", 0) > GameState.money
 
 
 func close() -> void:
