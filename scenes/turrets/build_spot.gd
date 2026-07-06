@@ -3,12 +3,12 @@ extends Area2D
 ## interactive region": its CollisionPolygon2D (a diamond matching the tile
 ## top) gives us mouse_entered / mouse_exited / input_event signals for free.
 ##
-## Note it does NOT build the turret itself — it just asks. Main decides,
-## because Main owns the money check and the scene layers. Keeping nodes
-## ignorant of their surroundings ("signal up, call down") is the core Godot
-## architecture habit.
+## Note it does NOT build/upgrade/sell anything itself — it just reports the
+## click. Main decides, because Main owns the money and the scene layers.
+## Keeping nodes ignorant of their surroundings ("signal up, call down") is
+## the core Godot architecture habit.
 
-signal build_requested(spot: Area2D)
+signal clicked(spot: Area2D)
 
 var turret: Turret = null
 var _hovered := false
@@ -30,9 +30,8 @@ func _set_hovered(state: bool) -> void:
 func _input_event(_viewport: Viewport, event: InputEvent, _shape_idx: int) -> void:
 	if event is InputEventMouseButton \
 			and event.button_index == MOUSE_BUTTON_LEFT \
-			and event.pressed \
-			and turret == null:
-		build_requested.emit(self)
+			and event.pressed:
+		clicked.emit(self)
 
 
 ## Brief red flash when the player can't afford the turret.

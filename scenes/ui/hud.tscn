@@ -1,6 +1,7 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://scenes/ui/hud.gd" id="1"]
+[ext_resource type="Script" path="res://scenes/ui/build_menu.gd" id="2"]
 
 [node name="HUD" type="CanvasLayer"]
 process_mode = 3
@@ -53,6 +54,42 @@ unique_name_in_owner = true
 layout_mode = 2
 theme_override_font_sizes/font_size = 20
 text = "  Start Wave  "
+
+[node name="BuildMenu" type="Control" parent="."]
+unique_name_in_owner = true
+visible = false
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("2")
+
+[node name="Panel" type="PanelContainer" parent="BuildMenu"]
+unique_name_in_owner = true
+layout_mode = 1
+
+[node name="Margin" type="MarginContainer" parent="BuildMenu/Panel"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 12
+
+[node name="VBox" type="VBoxContainer" parent="BuildMenu/Panel/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Title" type="Label" parent="BuildMenu/Panel/Margin/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "Build"
+
+[node name="OptionsBox" type="VBoxContainer" parent="BuildMenu/Panel/Margin/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 6
 
 [node name="EndOverlay" type="Control" parent="."]
 unique_name_in_owner = true

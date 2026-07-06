@@ -9,6 +9,12 @@ const TURRET_SCENE := preload("res://scenes/turrets/turret.tscn")
 const BUILD_SPOT_SCENE := preload("res://scenes/turrets/build_spot.tscn")
 const EXPLOSION_SCENE := preload("res://scenes/fx/explosion.tscn")
 
+## The buildable turret families. Adding a third = one .tres + one line here.
+const TURRET_TYPES := {
+	"cannon": preload("res://resources/turrets/cannon.tres"),
+	"frost": preload("res://resources/turrets/frost.tres"),
+}
+
 const TILE_DIR := "res://assets/kenney/PNG/Landscape/"
 const DETAIL_DIR := "res://assets/kenney/PNG/Details/"
 
@@ -51,7 +57,6 @@ const DECOR := {
 ## The HQ the tanks are trying to reach, next to the road exit.
 const BASE_CELL := Vector2i(11, 1)
 
-const TURRET_COST := 50
 const WAVE_SIZE := 10
 const SPAWN_INTERVAL := 1.1
 
@@ -65,6 +70,8 @@ const SPAWN_INTERVAL := 1.1
 var _wave_running := false
 var _game_ended := false
 var _tanks_remaining := 0
+## The spot whose menu is currently open (null when the menu is closed).
+var _menu_spot: Area2D = null
 
 
 func _ready() -> void:
@@ -76,6 +83,8 @@ func _ready() -> void:
 	_place_base()
 
 	hud.start_wave_pressed.connect(start_wave)
+	hud.build_menu.option_selected.connect(_on_menu_option)
+	hud.build_menu.closed.connect(_on_menu_closed)
 	GameState.lives_changed.connect(_on_lives_changed)
 
 	_handle_debug_args()
@@ -184,7 +193,7 @@ func _place_build_spots() -> void:
 	for cell in BUILD_CELLS:
 		var spot := BUILD_SPOT_SCENE.instantiate()
 		spot.position = Iso.cell_to_world(cell)
-		spot.build_requested.connect(_on_build_requested)
+		spot.clicked.connect(_on_spot_clicked)
 		markers.add_child(spot)
 
 
@@ -198,11 +207,74 @@ func _place_base() -> void:
 
 ## ---------- Gameplay ----------
 
-func _on_build_requested(spot: Area2D) -> void:
-	if not GameState.spend(TURRET_COST):
+## Clicking a spot opens a context menu: build options when empty,
+## upgrade/sell when occupied. The menu is dumb; the decisions live here.
+func _on_spot_clicked(spot: Area2D) -> void:
+	_menu_spot = spot
+	var options := []
+	var title: String
+	if spot.turret == null:
+		title = "Build"
+		for id in TURRET_TYPES:
+			var data: TurretData = TURRET_TYPES[id]
+			var cost: int = data.tiers[0].cost
+			options.append({
+				"id": "build:" + id,
+				"label": "%s — %dg" % [data.display_name, cost],
+				"enabled": GameState.can_afford(cost),
+			})
+	else:
+		var turret: Turret = spot.turret
+		title = "%s (level %d)" % [turret.data.display_name, turret.tier_index + 1]
+		turret.show_range = true
+		if turret.can_upgrade():
+			options.append({
+				"id": "upgrade",
+				"label": "Upgrade — %dg" % turret.upgrade_cost(),
+				"enabled": GameState.can_afford(turret.upgrade_cost()),
+			})
+		else:
+			options.append({"id": "upgrade", "label": "Max level", "enabled": false})
+		options.append({
+			"id": "sell",
+			"label": "Sell — +%dg" % turret.sell_value(),
+			"enabled": true,
+		})
+	# The spot lives in the scaled world; the menu lives on the screen.
+	# This transform converts between the two spaces.
+	var screen_pos := spot.get_global_transform_with_canvas().origin
+	hud.build_menu.open(screen_pos, title, options)
+
+
+func _on_menu_option(id: String) -> void:
+	var spot := _menu_spot
+	if spot == null:
+		return
+	if id.begins_with("build:"):
+		_build_turret(spot, id.trim_prefix("build:"))
+	elif id == "upgrade" and spot.turret != null:
+		if GameState.spend(spot.turret.upgrade_cost()):
+			spot.turret.upgrade()
+	elif id == "sell" and spot.turret != null:
+		GameState.earn(spot.turret.sell_value())
+		spot.turret.queue_free()
+		spot.turret = null
+		spot.queue_redraw()
+
+
+func _on_menu_closed() -> void:
+	if _menu_spot != null and _menu_spot.turret != null:
+		_menu_spot.turret.show_range = false
+	_menu_spot = null
+
+
+func _build_turret(spot: Area2D, type_id: String) -> void:
+	var data: TurretData = TURRET_TYPES[type_id]
+	if not GameState.spend(data.tiers[0].cost):
 		spot.flash_denied()
 		return
 	var turret := TURRET_SCENE.instantiate()
+	turret.data = data
 	turret.position = spot.position  # Markers and Objects share the same origin
 	objects.add_child(turret)
 	spot.turret = turret
@@ -267,9 +339,18 @@ func _end_game(message: String) -> void:
 func _handle_debug_args() -> void:
 	var args := OS.get_cmdline_user_args()
 	if "--autobuild" in args:
-		GameState.earn(TURRET_COST * markers.get_child_count())
-		for spot in markers.get_children():
-			_on_build_requested(spot)
+		GameState.earn(2000)
+		var type_ids := TURRET_TYPES.keys()
+		var spots := markers.get_children()
+		for i in spots.size():
+			_build_turret(spots[i], type_ids[i % type_ids.size()])
+		# Exercise the upgrade and sell paths too.
+		spots[0].turret.upgrade()
+		spots[0].turret.upgrade()
+		spots[1].turret.upgrade()
+		GameState.earn(spots[5].turret.sell_value())
+		spots[5].turret.queue_free()
+		spots[5].turret = null
 	if "--autostart" in args:
 		start_wave()
 	for arg in args:

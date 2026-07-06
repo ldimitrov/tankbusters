@@ -8,6 +8,7 @@ signal start_wave_pressed
 
 ## %Name reaches any node marked "unique in scene" regardless of where it
 ## sits in the hierarchy — no brittle $Path/To/Node chains.
+@onready var build_menu: Control = %BuildMenu
 @onready var money_label: Label = %MoneyLabel
 @onready var lives_label: Label = %LivesLabel
 @onready var wave_label: Label = %WaveLabel
