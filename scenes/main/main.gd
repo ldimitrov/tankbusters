@@ -1,8 +1,8 @@
 extends Node2D
-## The level. Builds the isometric map from data, owns the enemy road curve,
-## spawns waves, and reacts to game events. For milestone 1 the map and wave
-## live here as constants; later milestones move them into Resource files so
-## new levels/waves are data, not code.
+## The level. Generates a RANDOM map each game (path, build spots, decor),
+## builds it from Kenney tiles, and runs the wave sequence defined in
+## resources/waves/. Turret and tank stats live in resources too — this
+## script is orchestration, not content.
 
 const TANK_SCENE := preload("res://scenes/enemies/tank.tscn")
 const TURRET_SCENE := preload("res://scenes/turrets/turret.tscn")
@@ -14,6 +14,15 @@ const TURRET_TYPES := {
 	"cannon": preload("res://resources/turrets/cannon.tres"),
 	"frost": preload("res://resources/turrets/frost.tres"),
 }
+
+## The wave sequence, easiest to hardest.
+const WAVES: Array = [
+	preload("res://resources/waves/wave_1.tres"),
+	preload("res://resources/waves/wave_2.tres"),
+	preload("res://resources/waves/wave_3.tres"),
+	preload("res://resources/waves/wave_4.tres"),
+	preload("res://resources/waves/wave_5.tres"),
+]
 
 const TILE_DIR := "res://assets/kenney/PNG/Landscape/"
 const DETAIL_DIR := "res://assets/kenney/PNG/Details/"
@@ -30,35 +39,21 @@ const ROAD_TURNS := {
 	"NW": "landscape_07.png",
 	"SW": "landscape_03.png",
 }
+const DECOR_TEXTURES := [
+	"trees_1.png", "trees_2.png", "trees_4.png", "trees_7.png", "trees_9.png",
+	"rocks_1.png", "rocks_5.png", "crystals_2.png",
+]
 
 const GRID := Vector2i(12, 8)
-## The road, cell by cell, entrance to exit.
-const PATH_CELLS: Array[Vector2i] = [
-	Vector2i(0, 2), Vector2i(1, 2), Vector2i(2, 2), Vector2i(3, 2), Vector2i(4, 2),
-	Vector2i(4, 3), Vector2i(4, 4), Vector2i(4, 5),
-	Vector2i(5, 5), Vector2i(6, 5), Vector2i(7, 5),
-	Vector2i(7, 4), Vector2i(7, 3), Vector2i(7, 2),
-	Vector2i(8, 2), Vector2i(9, 2), Vector2i(10, 2), Vector2i(11, 2),
-]
-const BUILD_CELLS: Array[Vector2i] = [
-	Vector2i(2, 1), Vector2i(2, 3), Vector2i(5, 3),
-	Vector2i(6, 4), Vector2i(8, 3), Vector2i(9, 1),
-]
-const DECOR := {
-	Vector2i(1, 0): "trees_4.png",
-	Vector2i(6, 1): "trees_1.png",
-	Vector2i(10, 0): "trees_2.png",
-	Vector2i(10, 4): "trees_7.png",
-	Vector2i(9, 6): "trees_9.png",
-	Vector2i(1, 5): "rocks_5.png",
-	Vector2i(3, 6): "rocks_1.png",
-	Vector2i(6, 3): "crystals_2.png",
-}
-## The HQ the tanks are trying to reach, next to the road exit.
-const BASE_CELL := Vector2i(11, 1)
+const MIN_PATH_LENGTH := 15
+const BUILD_SPOT_COUNT := 7
+const DECOR_COUNT := 8
 
-const WAVE_SIZE := 10
-const SPAWN_INTERVAL := 1.1
+# Filled by _generate_map() — a fresh layout every game.
+var path_cells: Array[Vector2i] = []
+var build_cells: Array[Vector2i] = []
+var decor := {}  # cell -> texture file name
+var base_cell := Vector2i(-1, -1)
 
 @onready var world: Node2D = $World
 @onready var ground: Node2D = $World/Ground
@@ -67,15 +62,18 @@ const SPAWN_INTERVAL := 1.1
 @onready var objects: Node2D = $World/Objects
 @onready var hud: CanvasLayer = $HUD
 
+var _wave_index := 0  # how many waves have been started
 var _wave_running := false
 var _game_ended := false
 var _tanks_remaining := 0
+var _auto_waves := false
 ## The spot whose menu is currently open (null when the menu is closed).
 var _menu_spot: Area2D = null
 
 
 func _ready() -> void:
 	GameState.reset()
+	_generate_map()
 	_center_world()
 	_build_ground()
 	_build_road_curve()
@@ -86,8 +84,133 @@ func _ready() -> void:
 	hud.build_menu.option_selected.connect(_on_menu_option)
 	hud.build_menu.closed.connect(_on_menu_closed)
 	GameState.lives_changed.connect(_on_lives_changed)
+	hud.set_wave_text("Wave 0/%d" % WAVES.size())
 
 	_handle_debug_args()
+
+
+## ---------- Random map generation ----------
+
+func _generate_map() -> void:
+	var rng := RandomNumberGenerator.new()
+	# A seeded RNG replays the exact same "random" map — reproducible bugs.
+	var forced_seed := _arg_value("--seed")
+	if forced_seed != "":
+		rng.seed = int(forced_seed)
+	else:
+		rng.randomize()
+	print("Map seed: %d (relaunch with -- --seed=%d for the same map)" % [rng.seed, rng.seed])
+
+	path_cells = _generate_path(rng)
+	_pick_build_spots(rng)
+	_scatter_decor(rng)
+	_pick_base_cell()
+
+
+## Random walk from the west edge to the east edge. The one rule that keeps
+## the road drawable with our tile set: a new cell may touch the path ONLY at
+## the cell we came from — otherwise two road lanes would run side by side
+## and no tile could render that. Dead ends happen; we just retry.
+func _generate_path(rng: RandomNumberGenerator) -> Array[Vector2i]:
+	while true:
+		var attempt := _try_path(rng)
+		if attempt.size() >= MIN_PATH_LENGTH:
+			return attempt
+	return []  # unreachable, keeps the compiler happy
+
+
+func _try_path(rng: RandomNumberGenerator) -> Array[Vector2i]:
+	var start := Vector2i(0, rng.randi_range(1, GRID.y - 2))
+	var path: Array[Vector2i] = [start]
+	var occupied := {start: true}
+	var head := start
+	# Directions to try: east twice (bias toward the exit), the detours once.
+	var dirs := [
+		Vector2i(1, 0), Vector2i(1, 0),
+		Vector2i(0, 1), Vector2i(0, -1), Vector2i(-1, 0),
+	]
+	while head.x < GRID.x - 1:
+		var options: Array[Vector2i] = []
+		for dir in dirs:
+			var next: Vector2i = head + dir
+			if next.x < 1 or next.x >= GRID.x or next.y < 0 or next.y >= GRID.y:
+				continue
+			if occupied.has(next):
+				continue
+			var touches_path := false
+			for n in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+				if next + n != head and occupied.has(next + n):
+					touches_path = true
+					break
+			if not touches_path:
+				options.append(next)
+		if options.is_empty():
+			return []  # walked into a dead end — caller retries
+		head = options[rng.randi_range(0, options.size() - 1)]
+		path.append(head)
+		occupied[head] = true
+	return path
+
+
+## Build spots go on grass next to the road, spread out from each other.
+func _pick_build_spots(rng: RandomNumberGenerator) -> void:
+	var candidates: Array[Vector2i] = []
+	for cell in path_cells:
+		for n in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+			var c: Vector2i = cell + n
+			if c.x < 0 or c.x >= GRID.x or c.y < 0 or c.y >= GRID.y:
+				continue
+			if c in path_cells or c in candidates:
+				continue
+			candidates.append(c)
+	_shuffle(candidates, rng)
+
+	build_cells = []
+	for c in candidates:
+		if build_cells.size() >= BUILD_SPOT_COUNT:
+			break
+		var too_close := false
+		for chosen in build_cells:
+			if (c - chosen).length_squared() < 4:  # keep some spacing
+				too_close = true
+				break
+		if not too_close:
+			build_cells.append(c)
+
+
+func _scatter_decor(rng: RandomNumberGenerator) -> void:
+	var free: Array[Vector2i] = []
+	for y in GRID.y:
+		for x in GRID.x:
+			var c := Vector2i(x, y)
+			if c not in path_cells and c not in build_cells:
+				free.append(c)
+	_shuffle(free, rng)
+	decor = {}
+	for i in mini(DECOR_COUNT, free.size()):
+		decor[free[i]] = DECOR_TEXTURES[rng.randi_range(0, DECOR_TEXTURES.size() - 1)]
+
+
+## The HQ stands next to the road exit, on the first free neighbor cell.
+func _pick_base_cell() -> void:
+	var exit: Vector2i = path_cells[path_cells.size() - 1]
+	for n in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, -1), Vector2i(-1, 1)]:
+		var c: Vector2i = exit + n
+		if c.y < 0 or c.y >= GRID.y or c in path_cells:
+			continue
+		base_cell = c
+		decor.erase(c)
+		return
+
+
+## Fisher-Yates with OUR rng — Array.shuffle() would use the global one and
+## break seed reproducibility.
+func _shuffle(arr: Array, rng: RandomNumberGenerator) -> void:
+	for i in range(arr.size() - 1, 0, -1):
+		var j := rng.randi_range(0, i)
+		var tmp = arr[i]
+		arr[i] = arr[j]
+		arr[j] = tmp
 
 
 ## ---------- Map construction ----------
@@ -118,11 +241,11 @@ func _build_ground() -> void:
 	var road_tiles := _road_tile_map()
 	for cell in cells:
 		_add_tile(ground, TILE_DIR + road_tiles.get(cell, GRASS_TILE), cell)
-		if DECOR.has(cell):
+		if decor.has(cell):
 			# Decor sprites include their own tile block and stick up above it,
 			# so they go in the Y-sorted Objects layer: tanks and towers that
 			# are "in front" (lower on screen) must draw on top of them.
-			_add_tile(objects, DETAIL_DIR + DECOR[cell], cell)
+			_add_tile(objects, DETAIL_DIR + decor[cell], cell)
 
 
 ## One tile sprite, bottom-aligned so taller-than-standard art lines up.
@@ -142,11 +265,11 @@ func _add_tile(layer: Node2D, texture_path: String, cell: Vector2i) -> void:
 ## For every road cell, pick the tile matching which edges the road crosses.
 func _road_tile_map() -> Dictionary:
 	var result := {}
-	for i in PATH_CELLS.size():
-		var cell := PATH_CELLS[i]
+	for i in path_cells.size():
+		var cell := path_cells[i]
 		# Edges toward the previous and next path cell (map edge at the ends).
-		var to_prev := PATH_CELLS[i - 1] - cell if i > 0 else Vector2i(-1, 0)
-		var to_next := PATH_CELLS[i + 1] - cell if i < PATH_CELLS.size() - 1 else Vector2i(1, 0)
+		var to_prev := path_cells[i - 1] - cell if i > 0 else Vector2i(-1, 0)
+		var to_next := path_cells[i + 1] - cell if i < path_cells.size() - 1 else Vector2i(1, 0)
 		var edges := [_edge_letter(to_prev), _edge_letter(to_next)]
 		if "W" in edges and "E" in edges:
 			result[cell] = ROAD_WE
@@ -172,11 +295,11 @@ func _edge_letter(dir: Vector2i) -> String:
 ## borders, with bezier handles so corners are smooth arcs instead of kinks.
 func _build_road_curve() -> void:
 	var points: Array[Vector2] = []
-	var first := Iso.cell_to_world(PATH_CELLS[0])
-	var last := Iso.cell_to_world(PATH_CELLS[PATH_CELLS.size() - 1])
+	var first := Iso.cell_to_world(path_cells[0])
+	var last := Iso.cell_to_world(path_cells[path_cells.size() - 1])
 	points.append(first - Vector2(Iso.HALF_W, Iso.HALF_H) * 0.9)  # spawn at map edge
-	for i in PATH_CELLS.size() - 1:
-		points.append((Iso.cell_to_world(PATH_CELLS[i]) + Iso.cell_to_world(PATH_CELLS[i + 1])) / 2.0)
+	for i in path_cells.size() - 1:
+		points.append((Iso.cell_to_world(path_cells[i]) + Iso.cell_to_world(path_cells[i + 1])) / 2.0)
 	points.append(last + Vector2(Iso.HALF_W, Iso.HALF_H) * 0.9)  # drive off-map
 
 	var curve := Curve2D.new()
@@ -190,7 +313,7 @@ func _build_road_curve() -> void:
 
 
 func _place_build_spots() -> void:
-	for cell in BUILD_CELLS:
+	for cell in build_cells:
 		var spot := BUILD_SPOT_SCENE.instantiate()
 		spot.position = Iso.cell_to_world(cell)
 		spot.clicked.connect(_on_spot_clicked)
@@ -198,14 +321,16 @@ func _place_build_spots() -> void:
 
 
 func _place_base() -> void:
+	if base_cell.x < 0:
+		return
 	var sprite := Sprite2D.new()
 	sprite.texture = load("res://assets/kenney/PNG/Towers (grey)/tower_00.png")
-	sprite.position = Iso.cell_to_world(BASE_CELL)
+	sprite.position = Iso.cell_to_world(base_cell)
 	sprite.offset = Vector2(0, -33)
 	objects.add_child(sprite)
 
 
-## ---------- Gameplay ----------
+## ---------- Building ----------
 
 ## Clicking a spot opens a context menu: build options when empty,
 ## upgrade/sell when occupied. The menu is dumb; the decisions live here.
@@ -281,21 +406,32 @@ func _build_turret(spot: Area2D, type_id: String) -> void:
 	spot.queue_redraw()
 
 
+## ---------- Waves ----------
+
 func start_wave() -> void:
-	if _wave_running or _game_ended:
+	if _wave_running or _game_ended or _wave_index >= WAVES.size():
 		return
 	_wave_running = true
-	_tanks_remaining = WAVE_SIZE
+	var wave: WaveData = WAVES[_wave_index]
+	_wave_index += 1
 	hud.set_start_enabled(false)
-	hud.set_wave_text("Wave 1/1")
-	for i in WAVE_SIZE:
-		_spawn_tank()
-		# await pauses THIS function (not the game) until the timer fires.
-		await get_tree().create_timer(SPAWN_INTERVAL).timeout
+	hud.set_wave_text("Wave %d/%d" % [_wave_index, WAVES.size()])
+
+	_tanks_remaining = 0
+	for group in wave.groups:
+		_tanks_remaining += group.count
+	for group in wave.groups:
+		for i in group.count:
+			if _game_ended:
+				return
+			_spawn_tank(group.tank)
+			# await pauses THIS function (not the game) until the timer fires.
+			await get_tree().create_timer(group.interval).timeout
 
 
-func _spawn_tank() -> void:
+func _spawn_tank(tank_data: TankData) -> void:
 	var tank := TANK_SCENE.instantiate()
+	tank.data = tank_data
 	tank.path = enemy_path.curve
 	tank.died.connect(_on_tank_died)
 	tank.reached_base.connect(_on_tank_reached_base)
@@ -317,8 +453,17 @@ func _on_tank_reached_base() -> void:
 
 func _on_tank_resolved() -> void:
 	_tanks_remaining -= 1
-	if _tanks_remaining <= 0 and not _game_ended:
+	if _tanks_remaining > 0 or _game_ended:
+		return
+	if _wave_index >= WAVES.size():
 		_end_game("Victory!")
+		return
+	# Wave cleared: pay the bonus and open the next build phase.
+	GameState.earn(WAVES[_wave_index - 1].bonus)
+	_wave_running = false
+	hud.set_start_enabled(true)
+	if _auto_waves:
+		get_tree().create_timer(1.0).timeout.connect(start_wave)
 
 
 func _on_lives_changed(lives: int) -> void:
@@ -335,7 +480,7 @@ func _end_game(message: String) -> void:
 
 ## ---------- Development helpers ----------
 ## Custom args after "--" reach the game, e.g.:
-##   Godot --path . -- --autobuild --autostart --screenshot=/tmp/shot.png --delay=5
+##   Godot --path . -- --seed=7 --autobuild --autostart --screenshot=/tmp/s.png
 func _handle_debug_args() -> void:
 	var args := OS.get_cmdline_user_args()
 	if "--autobuild" in args:
@@ -344,28 +489,30 @@ func _handle_debug_args() -> void:
 		var spots := markers.get_children()
 		for i in spots.size():
 			_build_turret(spots[i], type_ids[i % type_ids.size()])
-		# Exercise the upgrade and sell paths too.
+		# Exercise the upgrade path too.
 		spots[0].turret.upgrade()
 		spots[0].turret.upgrade()
 		spots[1].turret.upgrade()
-		GameState.earn(spots[5].turret.sell_value())
-		spots[5].turret.queue_free()
-		spots[5].turret = null
 	if "--menu-test" in args:
 		# Regression test for the build flow: open the menu on a spot and
 		# press its first button, exactly like a player click would.
 		_on_spot_clicked(markers.get_child(2))
 		await get_tree().process_frame
 		hud.build_menu.options_box.get_child(0).pressed.emit()
-	if "--autostart" in args:
+	_auto_waves = "--autowaves" in args
+	if "--autostart" in args or _auto_waves:
 		start_wave()
-	for arg in args:
-		if arg.begins_with("--screenshot="):
-			var delay := 1.0
-			for a in args:
-				if a.begins_with("--delay="):
-					delay = float(a.trim_prefix("--delay="))
-			_save_screenshot(arg.trim_prefix("--screenshot="), delay)
+	var shot_path := _arg_value("--screenshot")
+	if shot_path != "":
+		_save_screenshot(shot_path, float(_arg_value("--delay", "1.0")))
+
+
+## Reads "--name=value" from the user args; returns `fallback` when absent.
+func _arg_value(name: String, fallback := "") -> String:
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with(name + "="):
+			return arg.trim_prefix(name + "=")
+	return fallback
 
 
 func _save_screenshot(path: String, delay: float) -> void:
