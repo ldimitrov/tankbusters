@@ -49,6 +49,8 @@ const MIN_PATH_LENGTH := 15
 const BUILD_SPOT_COUNT := 7
 const DECOR_COUNT := 8
 
+var _rng := RandomNumberGenerator.new()
+
 # Filled by _generate_map() — a fresh layout every game.
 var path_cells: Array[Vector2i] = []
 var build_cells: Array[Vector2i] = []
@@ -92,18 +94,17 @@ func _ready() -> void:
 ## ---------- Random map generation ----------
 
 func _generate_map() -> void:
-	var rng := RandomNumberGenerator.new()
 	# A seeded RNG replays the exact same "random" map — reproducible bugs.
 	var forced_seed := _arg_value("--seed")
 	if forced_seed != "":
-		rng.seed = int(forced_seed)
+		_rng.seed = int(forced_seed)
 	else:
-		rng.randomize()
-	print("Map seed: %d (relaunch with -- --seed=%d for the same map)" % [rng.seed, rng.seed])
+		_rng.randomize()
+	print("Map seed: %d (relaunch with -- --seed=%d for the same map)" % [_rng.seed, _rng.seed])
 
-	path_cells = _generate_path(rng)
-	_pick_build_spots(rng)
-	_scatter_decor(rng)
+	path_cells = _generate_path(_rng)
+	_pick_build_spots(_rng)
+	_scatter_decor(_rng)
 	_pick_base_cell()
 
 
@@ -230,22 +231,55 @@ func _center_world() -> void:
 
 
 func _build_ground() -> void:
+	# Pave every cell the window can see — the play area plus grass filler all
+	# the way past the screen edges, so the world has no visible border.
 	# Painter's algorithm: draw back rows first. In iso, "further back" simply
 	# means a smaller (x + y), so sort all cells by that sum.
+	var area := _visible_cell_bounds()
 	var cells: Array[Vector2i] = []
-	for y in GRID.y:
-		for x in GRID.x:
+	for y in range(area.position.y, area.end.y + 1):
+		for x in range(area.position.x, area.end.x + 1):
 			cells.append(Vector2i(x, y))
 	cells.sort_custom(func(a, b): return (a.x + a.y) < (b.x + b.y))
 
 	var road_tiles := _road_tile_map()
+	var in_grid := func(c: Vector2i) -> bool:
+		return c.x >= 0 and c.x < GRID.x and c.y >= 0 and c.y < GRID.y
 	for cell in cells:
-		_add_tile(ground, TILE_DIR + road_tiles.get(cell, GRASS_TILE), cell)
-		if decor.has(cell):
-			# Decor sprites include their own tile block and stick up above it,
-			# so they go in the Y-sorted Objects layer: tanks and towers that
-			# are "in front" (lower on screen) must draw on top of them.
-			_add_tile(objects, DETAIL_DIR + decor[cell], cell)
+		if in_grid.call(cell):
+			_add_tile(ground, TILE_DIR + road_tiles.get(cell, GRASS_TILE), cell)
+			if decor.has(cell):
+				# Decor sprites include their own tile block and stick up above
+				# it, so they go in the Y-sorted Objects layer: tanks and towers
+				# "in front" (lower on screen) must draw on top of them.
+				_add_tile(objects, DETAIL_DIR + decor[cell], cell)
+			continue
+		# Filler: the road runs on through it to the screen edge; the rest is
+		# grass with the occasional tree so it doesn't look like a dead sea.
+		if (cell.y == path_cells[0].y and cell.x < 0) \
+				or (cell.y == path_cells[path_cells.size() - 1].y and cell.x >= GRID.x):
+			_add_tile(ground, TILE_DIR + ROAD_WE, cell)
+			continue
+		_add_tile(ground, TILE_DIR + GRASS_TILE, cell)
+		if _rng.randf() < 0.05:
+			_add_tile(objects, DETAIL_DIR + DECOR_TEXTURES[_rng.randi_range(0, 4)], cell)
+
+
+## Which cells the window can see: un-project the viewport corners through
+## the world transform back into grid coordinates, then pad generously.
+func _visible_cell_bounds() -> Rect2i:
+	var inverse := world.transform.affine_inverse()
+	var view := get_viewport_rect().size
+	var min_c := Vector2i.ZERO
+	var max_c := GRID - Vector2i.ONE
+	for corner in [Vector2.ZERO, Vector2(view.x, 0), Vector2(0, view.y), view]:
+		var p: Vector2 = inverse * corner
+		# Inverse of cell_to_world.
+		var cx := (p.x / Iso.HALF_W + p.y / Iso.HALF_H) / 2.0
+		var cy := (p.y / Iso.HALF_H - p.x / Iso.HALF_W) / 2.0
+		min_c = Vector2i(mini(min_c.x, floori(cx) - 1), mini(min_c.y, floori(cy) - 1))
+		max_c = Vector2i(maxi(max_c.x, ceili(cx) + 1), maxi(max_c.y, ceili(cy) + 1))
+	return Rect2i(min_c, max_c - min_c)
 
 
 ## One tile sprite, bottom-aligned so taller-than-standard art lines up.
@@ -297,10 +331,16 @@ func _build_road_curve() -> void:
 	var points: Array[Vector2] = []
 	var first := Iso.cell_to_world(path_cells[0])
 	var last := Iso.cell_to_world(path_cells[path_cells.size() - 1])
-	points.append(first - Vector2(Iso.HALF_W, Iso.HALF_H) * 0.9)  # spawn at map edge
+	# Spawn/despawn just past the screen edges: measure how far the entry and
+	# exit cells are from them, in "cells travelled" (66*scale px per cell).
+	var step_x := Iso.HALF_W * world.scale.x
+	var view_width := get_viewport_rect().size.x
+	var entry_overhang := ceilf((world.transform * first).x / step_x) + 1.0
+	var exit_overhang := ceilf((view_width - (world.transform * last).x) / step_x) + 1.0
+	points.append(first - Vector2(Iso.HALF_W, Iso.HALF_H) * entry_overhang)
 	for i in path_cells.size() - 1:
 		points.append((Iso.cell_to_world(path_cells[i]) + Iso.cell_to_world(path_cells[i + 1])) / 2.0)
-	points.append(last + Vector2(Iso.HALF_W, Iso.HALF_H) * 0.9)  # drive off-map
+	points.append(last + Vector2(Iso.HALF_W, Iso.HALF_H) * exit_overhang)
 
 	var curve := Curve2D.new()
 	for p in points:
