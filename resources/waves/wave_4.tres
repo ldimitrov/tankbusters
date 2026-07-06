@@ -21,3 +21,4 @@ interval = 2.2
 script = ExtResource("1")
 groups = Array[ExtResource("2")]([SubResource("Group_1"), SubResource("Group_2")])
 bonus = 40
+hp_multiplier = 1.6

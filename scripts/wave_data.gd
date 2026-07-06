@@ -5,3 +5,6 @@ extends Resource
 
 @export var groups: Array[WaveGroup] = []
 @export var bonus := 30
+## Tank max HP is multiplied by this — later waves reuse the same tank
+## types but send them in with thicker armor.
+@export var hp_multiplier := 1.0

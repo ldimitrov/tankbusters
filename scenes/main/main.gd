@@ -386,7 +386,7 @@ func _on_spot_clicked(spot: Area2D) -> void:
 			options.append({
 				"id": "build:" + id,
 				"label": "%s — %dg" % [data.display_name, cost],
-				"enabled": GameState.can_afford(cost),
+				"cost": cost,
 			})
 	else:
 		var turret: Turret = spot.turret
@@ -396,14 +396,13 @@ func _on_spot_clicked(spot: Area2D) -> void:
 			options.append({
 				"id": "upgrade",
 				"label": "Upgrade — %dg" % turret.upgrade_cost(),
-				"enabled": GameState.can_afford(turret.upgrade_cost()),
+				"cost": turret.upgrade_cost(),
 			})
 		else:
 			options.append({"id": "upgrade", "label": "Max level", "enabled": false})
 		options.append({
 			"id": "sell",
 			"label": "Sell — +%dg" % turret.sell_value(),
-			"enabled": true,
 		})
 	# The spot lives in the scaled world; the menu lives on the screen.
 	# This transform converts between the two spaces.
@@ -464,14 +463,15 @@ func start_wave() -> void:
 		for i in group.count:
 			if _game_ended:
 				return
-			_spawn_tank(group.tank)
+			_spawn_tank(group.tank, wave.hp_multiplier)
 			# await pauses THIS function (not the game) until the timer fires.
 			await get_tree().create_timer(group.interval).timeout
 
 
-func _spawn_tank(tank_data: TankData) -> void:
+func _spawn_tank(tank_data: TankData, hp_multiplier: float) -> void:
 	var tank := TANK_SCENE.instantiate()
 	tank.data = tank_data
+	tank.hp_multiplier = hp_multiplier
 	tank.path = enemy_path.curve
 	tank.died.connect(_on_tank_died)
 	tank.reached_base.connect(_on_tank_reached_base)
@@ -542,7 +542,13 @@ func _handle_debug_args() -> void:
 		# press its first button, exactly like a player click would.
 		_on_spot_clicked(markers.get_child(2))
 		await get_tree().process_frame
-		hud.build_menu.options_box.get_child(0).pressed.emit()
+		# Affordability must track money changes while the menu is open.
+		var button: Button = hud.build_menu.options_box.get_child(0)
+		GameState.spend(GameState.money)
+		print("menu-test broke: disabled=%s (want true)" % button.disabled)
+		GameState.earn(500)
+		print("menu-test rich: disabled=%s (want false)" % button.disabled)
+		button.pressed.emit()
 	_auto_waves = "--autowaves" in args
 	if "--autostart" in args or _auto_waves:
 		start_wave()
