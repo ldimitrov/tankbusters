@@ -44,18 +44,22 @@ const DECOR_TEXTURES := [
 	"rocks_1.png", "rocks_5.png", "crystals_2.png",
 ]
 
-const GRID := Vector2i(12, 8)
-const MIN_PATH_LENGTH := 15
-const BUILD_SPOT_COUNT := 7
+const GRID := Vector2i(13, 9)
+const LANE_COUNT := 2
+const MIN_PATH_LENGTH := 14
+const BUILD_SPOT_COUNT := 9
 const DECOR_COUNT := 8
+const NEIGHBORS := [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
 
 var _rng := RandomNumberGenerator.new()
 
 # Filled by _generate_map() — a fresh layout every game.
-var path_cells: Array[Vector2i] = []
+var lanes: Array = []  # each lane: Array[Vector2i], entrance to exit
+var lane_curves: Array = []  # matching Curve2D per lane
+var _all_path_cells := {}  # every road cell of every lane, as a set
 var build_cells: Array[Vector2i] = []
 var decor := {}  # cell -> texture file name
-var base_cell := Vector2i(-1, -1)
+var base_cells: Array[Vector2i] = []
 
 @onready var world: Node2D = $World
 @onready var ground: Node2D = $World/Ground
@@ -78,9 +82,9 @@ func _ready() -> void:
 	_generate_map()
 	_center_world()
 	_build_ground()
-	_build_road_curve()
+	_build_road_curves()
 	_place_build_spots()
-	_place_base()
+	_place_bases()
 
 	hud.start_wave_pressed.connect(start_wave)
 	hud.build_menu.option_selected.connect(_on_menu_option)
@@ -102,28 +106,56 @@ func _generate_map() -> void:
 		_rng.randomize()
 	print("Map seed: %d (relaunch with -- --seed=%d for the same map)" % [_rng.seed, _rng.seed])
 
-	path_cells = _generate_path(_rng)
+	lanes = _generate_lanes(_rng)
+	_all_path_cells = {}
+	for lane in lanes:
+		for cell in lane:
+			_all_path_cells[cell] = true
 	_pick_build_spots(_rng)
 	_scatter_decor(_rng)
-	_pick_base_cell()
+	_pick_base_cells()
+
+
+## Several independent attack lanes. Each new lane treats the previous ones
+## as blocked terrain, so lanes always keep at least one grass cell apart.
+func _generate_lanes(rng: RandomNumberGenerator) -> Array:
+	while true:
+		var result := []
+		var blocked := {}
+		for lane_i in LANE_COUNT:
+			var lane := _generate_path(rng, blocked, 90)
+			if lane.is_empty():
+				break  # couldn't fit another lane — reroll the whole map
+			result.append(lane)
+			for cell in lane:
+				blocked[cell] = true
+		if result.size() == LANE_COUNT:
+			return result
+	return []  # unreachable, keeps the compiler happy
 
 
 ## Random walk from the west edge to the east edge. The one rule that keeps
 ## the road drawable with our tile set: a new cell may touch the path ONLY at
 ## the cell we came from — otherwise two road lanes would run side by side
 ## and no tile could render that. Dead ends happen; we just retry.
-func _generate_path(rng: RandomNumberGenerator) -> Array[Vector2i]:
-	while true:
-		var attempt := _try_path(rng)
-		if attempt.size() >= MIN_PATH_LENGTH:
-			return attempt
-	return []  # unreachable, keeps the compiler happy
+func _generate_path(rng: RandomNumberGenerator, blocked: Dictionary, tries: int) -> Array[Vector2i]:
+	for attempt in tries:
+		var path := _try_path(rng, blocked)
+		if path.size() >= MIN_PATH_LENGTH:
+			return path
+	return []
 
 
-func _try_path(rng: RandomNumberGenerator) -> Array[Vector2i]:
+func _try_path(rng: RandomNumberGenerator, blocked: Dictionary) -> Array[Vector2i]:
 	var start := Vector2i(0, rng.randi_range(1, GRID.y - 2))
+	var occupied := blocked.duplicate()
+	if occupied.has(start):
+		return []
+	for n in NEIGHBORS:
+		if occupied.has(start + n):
+			return []
 	var path: Array[Vector2i] = [start]
-	var occupied := {start: true}
+	occupied[start] = true
 	var head := start
 	# Directions to try: east twice (bias toward the exit), the detours once.
 	var dirs := [
@@ -139,7 +171,7 @@ func _try_path(rng: RandomNumberGenerator) -> Array[Vector2i]:
 			if occupied.has(next):
 				continue
 			var touches_path := false
-			for n in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+			for n in NEIGHBORS:
 				if next + n != head and occupied.has(next + n):
 					touches_path = true
 					break
@@ -153,15 +185,15 @@ func _try_path(rng: RandomNumberGenerator) -> Array[Vector2i]:
 	return path
 
 
-## Build spots go on grass next to the road, spread out from each other.
+## Build spots go on grass next to any road, spread out from each other.
 func _pick_build_spots(rng: RandomNumberGenerator) -> void:
 	var candidates: Array[Vector2i] = []
-	for cell in path_cells:
-		for n in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+	for cell in _all_path_cells:
+		for n in NEIGHBORS:
 			var c: Vector2i = cell + n
 			if c.x < 0 or c.x >= GRID.x or c.y < 0 or c.y >= GRID.y:
 				continue
-			if c in path_cells or c in candidates:
+			if _all_path_cells.has(c) or c in candidates:
 				continue
 			candidates.append(c)
 	_shuffle(candidates, rng)
@@ -184,7 +216,7 @@ func _scatter_decor(rng: RandomNumberGenerator) -> void:
 	for y in GRID.y:
 		for x in GRID.x:
 			var c := Vector2i(x, y)
-			if c not in path_cells and c not in build_cells:
+			if not _all_path_cells.has(c) and c not in build_cells:
 				free.append(c)
 	_shuffle(free, rng)
 	decor = {}
@@ -192,16 +224,18 @@ func _scatter_decor(rng: RandomNumberGenerator) -> void:
 		decor[free[i]] = DECOR_TEXTURES[rng.randi_range(0, DECOR_TEXTURES.size() - 1)]
 
 
-## The HQ stands next to the road exit, on the first free neighbor cell.
-func _pick_base_cell() -> void:
-	var exit: Vector2i = path_cells[path_cells.size() - 1]
-	for n in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, -1), Vector2i(-1, 1)]:
-		var c: Vector2i = exit + n
-		if c.y < 0 or c.y >= GRID.y or c in path_cells:
-			continue
-		base_cell = c
-		decor.erase(c)
-		return
+## One HQ next to each lane's exit, on the first free neighbor cell.
+func _pick_base_cells() -> void:
+	base_cells = []
+	for lane in lanes:
+		var exit: Vector2i = lane[lane.size() - 1]
+		for n in [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, -1), Vector2i(-1, 1)]:
+			var c: Vector2i = exit + n
+			if c.y < 0 or c.y >= GRID.y or _all_path_cells.has(c) or c in base_cells:
+				continue
+			base_cells.append(c)
+			decor.erase(c)
+			break
 
 
 ## Fisher-Yates with OUR rng — Array.shuffle() would use the global one and
@@ -242,7 +276,14 @@ func _build_ground() -> void:
 			cells.append(Vector2i(x, y))
 	cells.sort_custom(func(a, b): return (a.x + a.y) < (b.x + b.y))
 
-	var road_tiles := _road_tile_map()
+	var road_tiles := {}
+	var entry_rows := {}
+	var exit_rows := {}
+	for lane in lanes:
+		road_tiles.merge(_road_tile_map(lane))
+		entry_rows[lane[0].y] = true
+		exit_rows[lane[lane.size() - 1].y] = true
+
 	var in_grid := func(c: Vector2i) -> bool:
 		return c.x >= 0 and c.x < GRID.x and c.y >= 0 and c.y < GRID.y
 	for cell in cells:
@@ -254,10 +295,10 @@ func _build_ground() -> void:
 				# "in front" (lower on screen) must draw on top of them.
 				_add_tile(objects, DETAIL_DIR + decor[cell], cell)
 			continue
-		# Filler: the road runs on through it to the screen edge; the rest is
+		# Filler: the roads run on through it to the screen edge; the rest is
 		# grass with the occasional tree so it doesn't look like a dead sea.
-		if (cell.y == path_cells[0].y and cell.x < 0) \
-				or (cell.y == path_cells[path_cells.size() - 1].y and cell.x >= GRID.x):
+		if (entry_rows.has(cell.y) and cell.x < 0) \
+				or (exit_rows.has(cell.y) and cell.x >= GRID.x):
 			_add_tile(ground, TILE_DIR + ROAD_WE, cell)
 			continue
 		_add_tile(ground, TILE_DIR + GRASS_TILE, cell)
@@ -296,8 +337,8 @@ func _add_tile(layer: Node2D, texture_path: String, cell: Vector2i) -> void:
 	layer.add_child(sprite)
 
 
-## For every road cell, pick the tile matching which edges the road crosses.
-func _road_tile_map() -> Dictionary:
+## For every cell of one lane, pick the tile matching the road's edges.
+func _road_tile_map(path_cells: Array[Vector2i]) -> Dictionary:
 	var result := {}
 	for i in path_cells.size():
 		var cell := path_cells[i]
@@ -325,9 +366,17 @@ func _edge_letter(dir: Vector2i) -> String:
 	return "?"
 
 
-## Build the Curve2D the tanks drive along: through the midpoints of the cell
-## borders, with bezier handles so corners are smooth arcs instead of kinks.
-func _build_road_curve() -> void:
+## Build one Curve2D per lane: through the midpoints of the cell borders,
+## with bezier handles so corners are smooth arcs instead of kinks.
+func _build_road_curves() -> void:
+	lane_curves = []
+	for lane in lanes:
+		lane_curves.append(_lane_curve(lane))
+	# The Path2D node just visualizes the first lane in the editor.
+	enemy_path.curve = lane_curves[0]
+
+
+func _lane_curve(path_cells: Array[Vector2i]) -> Curve2D:
 	var points: Array[Vector2] = []
 	var first := Iso.cell_to_world(path_cells[0])
 	var last := Iso.cell_to_world(path_cells[path_cells.size() - 1])
@@ -349,7 +398,7 @@ func _build_road_curve() -> void:
 		var handle := (points[i + 1] - points[i - 1]).normalized() * 22.0
 		curve.set_point_in(i, -handle)
 		curve.set_point_out(i, handle)
-	enemy_path.curve = curve
+	return curve
 
 
 func _place_build_spots() -> void:
@@ -360,14 +409,13 @@ func _place_build_spots() -> void:
 		markers.add_child(spot)
 
 
-func _place_base() -> void:
-	if base_cell.x < 0:
-		return
-	var sprite := Sprite2D.new()
-	sprite.texture = load("res://assets/kenney/PNG/Towers (grey)/tower_00.png")
-	sprite.position = Iso.cell_to_world(base_cell)
-	sprite.offset = Vector2(0, -33)
-	objects.add_child(sprite)
+func _place_bases() -> void:
+	for cell in base_cells:
+		var sprite := Sprite2D.new()
+		sprite.texture = load("res://assets/kenney/PNG/Towers (grey)/tower_00.png")
+		sprite.position = Iso.cell_to_world(cell)
+		sprite.offset = Vector2(0, -33)
+		objects.add_child(sprite)
 
 
 ## ---------- Building ----------
@@ -459,20 +507,27 @@ func start_wave() -> void:
 	_tanks_remaining = 0
 	for group in wave.groups:
 		_tanks_remaining += group.count
+	# Groups run CONCURRENTLY (no await between them), so heavies trickle in
+	# among the scout swarm instead of politely queueing up behind it.
 	for group in wave.groups:
-		for i in group.count:
-			if _game_ended:
-				return
-			_spawn_tank(group.tank, wave.hp_multiplier)
-			# await pauses THIS function (not the game) until the timer fires.
-			await get_tree().create_timer(group.interval).timeout
+		_run_group(group, wave.hp_multiplier)
+
+
+func _run_group(group: WaveGroup, hp_multiplier: float) -> void:
+	for i in group.count:
+		if _game_ended:
+			return
+		_spawn_tank(group.tank, hp_multiplier)
+		# await pauses THIS function (not the game) until the timer fires.
+		await get_tree().create_timer(group.interval).timeout
 
 
 func _spawn_tank(tank_data: TankData, hp_multiplier: float) -> void:
 	var tank := TANK_SCENE.instantiate()
 	tank.data = tank_data
 	tank.hp_multiplier = hp_multiplier
-	tank.path = enemy_path.curve
+	# Each tank rolls which lane it attacks on — split defenses required.
+	tank.path = lane_curves[_rng.randi_range(0, lane_curves.size() - 1)]
 	tank.died.connect(_on_tank_died)
 	tank.reached_base.connect(_on_tank_reached_base)
 	objects.add_child(tank)
@@ -533,10 +588,9 @@ func _handle_debug_args() -> void:
 		var spots := markers.get_children()
 		for i in spots.size():
 			_build_turret(spots[i], type_ids[i % type_ids.size()])
-		# Exercise the upgrade path too.
-		spots[0].turret.upgrade()
-		spots[0].turret.upgrade()
-		spots[1].turret.upgrade()
+			# Max everything out — the "best possible defense" benchmark.
+			while spots[i].turret.can_upgrade():
+				spots[i].turret.upgrade()
 	if "--menu-test" in args:
 		# Regression test for the build flow: open the menu on a spot and
 		# press its first button, exactly like a player click would.
