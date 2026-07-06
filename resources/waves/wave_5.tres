@@ -1,24 +1,31 @@
-[gd_resource type="Resource" script_class="WaveData" load_steps=6 format=3]
+[gd_resource type="Resource" script_class="WaveData" load_steps=7 format=3]
 
 [ext_resource type="Script" path="res://scripts/wave_data.gd" id="1"]
 [ext_resource type="Script" path="res://scripts/wave_group.gd" id="2"]
 [ext_resource type="Resource" path="res://resources/tanks/scout.tres" id="3"]
-[ext_resource type="Resource" path="res://resources/tanks/heavy.tres" id="4"]
+[ext_resource type="Resource" path="res://resources/tanks/tank.tres" id="4"]
+[ext_resource type="Resource" path="res://resources/tanks/heavy.tres" id="5"]
 
 [sub_resource type="Resource" id="Group_1"]
 script = ExtResource("2")
 tank = ExtResource("3")
-count = 12
-interval = 0.8
+count = 14
+interval = 0.9
 
 [sub_resource type="Resource" id="Group_2"]
 script = ExtResource("2")
 tank = ExtResource("4")
+count = 8
+interval = 1.5
+
+[sub_resource type="Resource" id="Group_3"]
+script = ExtResource("2")
+tank = ExtResource("5")
 count = 6
-interval = 2.0
+interval = 3.0
 
 [resource]
 script = ExtResource("1")
-groups = Array[ExtResource("2")]([SubResource("Group_1"), SubResource("Group_2")])
-bonus = 50
+groups = Array[ExtResource("2")]([SubResource("Group_1"), SubResource("Group_2"), SubResource("Group_3")])
+bonus = 60
 hp_multiplier = 1.9

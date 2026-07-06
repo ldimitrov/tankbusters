@@ -8,17 +8,17 @@
 [sub_resource type="Resource" id="Group_1"]
 script = ExtResource("2")
 tank = ExtResource("3")
-count = 10
+count = 12
 interval = 1.2
 
 [sub_resource type="Resource" id="Group_2"]
 script = ExtResource("2")
 tank = ExtResource("4")
-count = 4
-interval = 2.2
+count = 5
+interval = 3.6
 
 [resource]
 script = ExtResource("1")
 groups = Array[ExtResource("2")]([SubResource("Group_1"), SubResource("Group_2")])
-bonus = 40
-hp_multiplier = 1.6
+bonus = 50
+hp_multiplier = 1.65
