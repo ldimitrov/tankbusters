@@ -68,6 +68,18 @@ for the tank model, health bars, range ellipse, build pads and cannonballs.
 
 See: `scripts/tank_body.gd` (a tiny 3D-to-iso box renderer), `turret.gd:_draw`.
 
+## Custom Resources (data-driven design)
+
+A script extending `Resource` defines a data schema; instances are saved as
+`.tres` text files. Turret families live in `resources/turrets/*.tres` —
+balancing costs or adding a whole new turret type means editing data, not
+code. Resources are loaded once and shared: every Cannon turret points at
+the *same* `cannon.tres` object, so they're cheap. This is the single most
+important Godot architecture habit for content-heavy games.
+
+See: `scripts/turret_tier.gd`, `scripts/turret_data.gd`,
+`resources/turrets/cannon.tres`, consumed by `turret.gd`.
+
 ## Paths and curves
 
 `Path2D` holds a `Curve2D`. `curve.sample_baked(distance)` returns the point

@@ -15,8 +15,10 @@ and press **F5**, or from the terminal:
 /Applications/Godot.app/Contents/MacOS/Godot --path .
 ```
 
-Click a white diamond pad to build a turret (50 gold), then press
-**Start Wave**. Hover a built pad to see the turret's range.
+Click a white diamond pad and pick a turret — **Cannon** (damage) or
+**Frost** (slows tanks in its aura) — then press **Start Wave**. Click a
+built turret to **upgrade** it (3 levels each) or **sell** it (70% refund)
+and build something else on the freed spot. Hover a built pad to see range.
 
 ## Development flags
 
