@@ -1,0 +1,42 @@
+[gd_resource type="Resource" script_class="TurretData" load_steps=9 format=3]
+
+[ext_resource type="Script" path="res://scripts/turret_data.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/turret_tier.gd" id="2"]
+[ext_resource type="Texture2D" path="res://assets/kenney/PNG/Towers (grey)/tower_50.png" id="3"]
+[ext_resource type="Texture2D" path="res://assets/kenney/PNG/Towers (grey)/tower_41.png" id="4"]
+[ext_resource type="Texture2D" path="res://assets/kenney/PNG/Towers (grey)/tower_00.png" id="5"]
+
+[sub_resource type="Resource" id="Tier_1"]
+script = ExtResource("2")
+cost = 35
+damage = 0.0
+fire_interval = 0.9
+fire_range = 140.0
+slow_factor = 0.35
+texture = ExtResource("3")
+tint = Color(0.72, 0.88, 1, 1)
+
+[sub_resource type="Resource" id="Tier_2"]
+script = ExtResource("2")
+cost = 40
+damage = 0.0
+fire_interval = 0.9
+fire_range = 155.0
+slow_factor = 0.5
+texture = ExtResource("4")
+tint = Color(0.72, 0.88, 1, 1)
+
+[sub_resource type="Resource" id="Tier_3"]
+script = ExtResource("2")
+cost = 55
+damage = 0.0
+fire_interval = 0.9
+fire_range = 170.0
+slow_factor = 0.62
+texture = ExtResource("5")
+tint = Color(0.72, 0.88, 1, 1)
+
+[resource]
+script = ExtResource("1")
+display_name = "Frost"
+tiers = Array[ExtResource("2")]([SubResource("Tier_1"), SubResource("Tier_2"), SubResource("Tier_3")])
