@@ -15,10 +15,15 @@ and press **F5**, or from the terminal:
 /Applications/Godot.app/Contents/MacOS/Godot --path .
 ```
 
-Click a white diamond pad and pick a turret — **Cannon** (damage) or
-**Frost** (slows tanks in its aura) — then press **Start Wave**. Click a
-built turret to **upgrade** it (3 levels each) or **sell** it (70% refund)
-and build something else on the freed spot. Hover a built pad to see range.
+Every game generates a **random map** (path, build spots, decor). Click a
+white diamond pad and pick a turret — **Cannon** (damage) or **Frost**
+(slows tanks in its aura) — then press **Start Wave**. Click a built turret
+to **upgrade** it (3 levels each) or **sell** it (70% refund) and build
+something else on the freed spot. Hover a built pad to see range.
+
+Survive all **5 waves** of scouts (fast), tanks, and heavies (slow, armored).
+The level is failed once 3 tanks escape. The console prints the map seed;
+replay a layout with `-- --seed=N`.
 
 ## Development flags
 
