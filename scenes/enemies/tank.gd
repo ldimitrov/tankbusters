@@ -10,6 +10,9 @@ signal reached_base
 
 ## Which enemy type this is — stats and looks come from the resource.
 var data: TankData
+## Set by the spawner: later waves send the same types with more armor.
+var hp_multiplier := 1.0
+var _max_hp := 0.0
 
 var path: Curve2D
 ## Distance travelled along the curve, in pixels. Turrets read this to decide
@@ -28,7 +31,8 @@ const SLOW_TINT := Color(0.55, 1.05, 1.75)
 
 
 func _ready() -> void:
-	hp = data.max_hp
+	_max_hp = data.max_hp * hp_multiplier
+	hp = _max_hp
 	body.base_color = data.color
 	body.scale = Vector2.ONE * data.body_scale
 	# Groups are Godot's cheap global tagging: turrets ask the scene tree for
@@ -78,10 +82,12 @@ func take_damage(amount: float) -> void:
 
 ## Health bar, only shown once damaged.
 func _draw() -> void:
-	if hp >= data.max_hp or hp <= 0.0:
+	if hp >= _max_hp or hp <= 0.0:
 		return
-	var width := 36.0
-	draw_rect(Rect2(-width / 2, -38, width, 5), Color(0, 0, 0, 0.55))
-	var ratio := hp / data.max_hp
+	# Scale the bar with the tank so it clears the turret of big tanks.
+	var width := 36.0 * data.body_scale
+	var top := -38.0 * data.body_scale
+	draw_rect(Rect2(-width / 2, top, width, 5), Color(0, 0, 0, 0.55))
+	var ratio := hp / _max_hp
 	var fill := Color("7ec850").lerp(Color("d84b4b"), 1.0 - ratio)
-	draw_rect(Rect2(-width / 2 + 1, -37, (width - 2) * ratio, 3), fill)
+	draw_rect(Rect2(-width / 2 + 1, top + 1, (width - 2) * ratio, 3), fill)
