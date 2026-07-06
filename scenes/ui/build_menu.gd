@@ -43,8 +43,10 @@ func close() -> void:
 
 
 func _on_option_pressed(id: String) -> void:
-	close()
+	# Order matters: whoever listens needs the selection BEFORE `closed`
+	# fires, because closing resets the "which spot is this menu for" state.
 	option_selected.emit(id)
+	close()
 
 
 func _gui_input(event: InputEvent) -> void:

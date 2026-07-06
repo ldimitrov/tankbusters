@@ -351,6 +351,12 @@ func _handle_debug_args() -> void:
 		GameState.earn(spots[5].turret.sell_value())
 		spots[5].turret.queue_free()
 		spots[5].turret = null
+	if "--menu-test" in args:
+		# Regression test for the build flow: open the menu on a spot and
+		# press its first button, exactly like a player click would.
+		_on_spot_clicked(markers.get_child(2))
+		await get_tree().process_frame
+		hud.build_menu.options_box.get_child(0).pressed.emit()
 	if "--autostart" in args:
 		start_wave()
 	for arg in args:
