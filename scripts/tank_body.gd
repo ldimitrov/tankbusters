@@ -18,10 +18,13 @@ const BODY := Vector3(22, 12, 8)
 const TURRET := Vector3(10, 8, 8)
 const BARREL_LENGTH := 28.0
 
-const C_BODY_TOP := Color("6a8f4f")
-const C_BODY_SIDE := Color("55743f")
-const C_TURRET_TOP := Color("7aa35c")
-const C_TURRET_SIDE := Color("5d7f45")
+## Hull color; the shades for sides and turret derive from it, so recoloring
+## a whole tank type is a single value in its TankData resource.
+var base_color := Color("6a8f4f"):
+	set(value):
+		base_color = value
+		queue_redraw()
+
 const C_BARREL := Color("39462f")
 # Light comes from the upper-left, matching the Kenney tiles.
 const LIGHT_DIR := Vector2(-0.6, -0.8)
@@ -41,9 +44,9 @@ func _draw() -> void:
 		shadow.append(_project(corner.x, corner.y, -1.0))
 	draw_colored_polygon(shadow, Color(0, 0, 0, 0.18))
 
-	_draw_box(TRACKS, 0.0, Color("3f4a38"), Color("343d2e"))
-	_draw_box(BODY, TRACKS.z, C_BODY_TOP, C_BODY_SIDE)
-	_draw_box(TURRET, TRACKS.z + BODY.z, C_TURRET_TOP, C_TURRET_SIDE)
+	_draw_box(TRACKS, 0.0, base_color.darkened(0.5), base_color.darkened(0.62))
+	_draw_box(BODY, TRACKS.z, base_color, base_color.darkened(0.22))
+	_draw_box(TURRET, TRACKS.z + BODY.z, base_color.lightened(0.12), base_color.darkened(0.1))
 	# Barrel: a thick line from the turret front, slightly above turret mid-height.
 	var barrel_z := TRACKS.z + BODY.z + TURRET.z * 0.6
 	draw_line(

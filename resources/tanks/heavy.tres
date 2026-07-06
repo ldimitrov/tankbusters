@@ -1,0 +1,12 @@
+[gd_resource type="Resource" script_class="TankData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/tank_data.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+display_name = "Heavy"
+speed = 52.0
+max_hp = 330.0
+bounty = 35
+color = Color(0.34, 0.36, 0.41, 1)
+body_scale = 1.3

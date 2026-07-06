@@ -8,9 +8,8 @@ extends Node2D
 signal died(bounty: int, at: Vector2)
 signal reached_base
 
-@export var speed := 90.0
-@export var max_hp := 100.0
-@export var bounty := 15
+## Which enemy type this is — stats and looks come from the resource.
+var data: TankData
 
 var path: Curve2D
 ## Distance travelled along the curve, in pixels. Turrets read this to decide
@@ -29,7 +28,9 @@ const SLOW_TINT := Color(0.55, 1.05, 1.75)
 
 
 func _ready() -> void:
-	hp = max_hp
+	hp = data.max_hp
+	body.base_color = data.color
+	body.scale = Vector2.ONE * data.body_scale
 	# Groups are Godot's cheap global tagging: turrets ask the scene tree for
 	# every node in group "tanks" instead of keeping fragile lists.
 	add_to_group("tanks")
@@ -43,7 +44,7 @@ func _process(delta: float) -> void:
 			_slow_factor = 0.0
 			body.modulate = Color.WHITE
 
-	progress += speed * (1.0 - _slow_factor) * delta
+	progress += data.speed * (1.0 - _slow_factor) * delta
 	if progress >= path.get_baked_length():
 		reached_base.emit()
 		queue_free()
@@ -71,16 +72,16 @@ func take_damage(amount: float) -> void:
 	hp -= amount
 	queue_redraw()
 	if hp <= 0.0:
-		died.emit(bounty, position)
+		died.emit(data.bounty, position)
 		queue_free()
 
 
 ## Health bar, only shown once damaged.
 func _draw() -> void:
-	if hp >= max_hp or hp <= 0.0:
+	if hp >= data.max_hp or hp <= 0.0:
 		return
 	var width := 36.0
 	draw_rect(Rect2(-width / 2, -38, width, 5), Color(0, 0, 0, 0.55))
-	var ratio := hp / max_hp
+	var ratio := hp / data.max_hp
 	var fill := Color("7ec850").lerp(Color("d84b4b"), 1.0 - ratio)
 	draw_rect(Rect2(-width / 2 + 1, -37, (width - 2) * ratio, 3), fill)
